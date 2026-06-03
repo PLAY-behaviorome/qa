@@ -35,7 +35,7 @@ Most of the functions we need require that we specify the target volume ID (`vol
 VOLUME_ID <- 1657
 ```
 
-### Volume summary
+### Volume checks
 
 ```{r}
 vol_df <- databraryr::get_volume_by_id(vol_id = VOLUME_ID)
@@ -45,6 +45,7 @@ Does the volume title follow the project convention?
 
 ::: {.callout-note}
 The name 'prefix' contains "PLAYProject_" and the 'postfix' is a 5-chararacter string with all capital letters or a number.
+:::
 
 ```{r}
 vol_name_ok <- function(vol_df) {
@@ -55,6 +56,8 @@ vol_name_ok <- function(vol_df) {
   postfix_ok <- stringr::str_detect(vol_df$title, "[A-Z1-2]{5}$")
   prefix_ok & postfix_ok
 }
+
+vol_name_ok(vol_df)
 ```
 
 Is the volume sharing level ok?
@@ -67,6 +70,8 @@ vol_sharing_level_ok <- function(vol_df, sharing_level = "public_overview_only")
   assertthat::assert_that(sharing_level %in% c("public", "public_overview_only"))
   vol_df$sharing_level == sharing_level
 }
+
+vol_sharing_level_ok(vol_df)
 ```
 
 Is funder information correct?
@@ -81,11 +86,239 @@ The funder should be consistent across the site specific volumes.
 vol_funding_ok <- function(vol_df) {
   assertthat::assert_that(!is.null(vol_df))
   assertthat::has_name(vol_df, "fundings")
-  
-  
+  funding_not_empty <- (length(vol_df$fundings[[1]]) > 0)
+  funding_not_empty
 }
+
+vol_funding_ok(vol_df)
 ```
 
+## Session checks
+
+```{r}
+make_session_folder_prefix <- function(vol_id) {
+  assertthat::is.number(vol_id)
+  assertthat::assert_that(vol_id > 0)
+  
+  vol_df <- databraryr::get_volume_by_id(vol_id = vol_id)
+  assertthat::assert_that(!is.null(vol_df))
+  assertthat::has_name(vol_df, "title")
+  
+  paste0("PLAY_", stringr::str_extract(vol_df$title, "[A-Z1-2]{5}$"), "_")
+}
+
+make_session_folder_prefix(VOLUME_ID)
+```
+
+Are there sessions?
+
+```{r}
+vol_sessions <- databraryr::list_volume_sessions(vol_id = VOLUME_ID)
+
+sessions_exist <- function(vol_sessions) {
+  assertthat::assert_that(!is.null(vol_sessions))
+  dim(vol_sessions)[1] > 0
+}
+
+sessions_exist(vol_sessions)
+```
+
+### Session names
+
+Session name(s) follow standard.
+
+```{r}
+folder_name_ok <- function(vol_folders, prefix = "PLAY_PENNS_") {
+  assertthat::assert_that(!is.null(vol_folders))
+  assertthat::has_name(vol_folders, "folder_name")
+  assertthat::is.string(prefix)
+  
+  names <- vol_folders$folder_name
+  stringr::str_detect(names, "demographics")
+  
+  prefix_ok <- stringr::str_detect(names, paste0("^", prefix))
+  postfix_ok <- stringr::str_detect(names, "demographics$")
+  prefix_ok & postfix_ok
+}
+
+session_name_suffix_ok <- function(name) {
+  assertthat::is.string(name)
+  
+  suffix <- stringr::str_extract(name, "[0-9]{3}$")
+  as.numeric(suffix) > 0
+}
+
+session_name_prefix_ok <- function(name, prefix) {
+  assertthat::is.string(name)
+  assertthat::is.string(prefix)
+  session_prefix <- stringr::str_extract(name, paste0("PLAY_[A-Z0-9]{5}_"))
+  prefix == session_prefix
+}
+
+session_name_prefix_ok(vol_sessions$session_name[1], 
+                       prefix = make_session_folder_prefix(VOLUME_ID))
+
+session_name_suffix_ok(vol_sessions$session_name[1])
+```
+
+Check all sessions.
+
+```{r}
+session_folder_prefix <- make_session_folder_prefix(VOLUME_ID)
+# purrr::map(vol_sessions$session_name, session_name_prefix_ok, prefix = session_folder_prefix) |> purrr::list_c()
+
+session_prefix_names_ok <- function(vol_sessions, prefix) {
+  prefixes_ok <- purrr::map(vol_sessions$session_name, session_name_prefix_ok, prefix = prefix) |> 
+    purrr::list_c()
+  sum(prefixes_ok) == length(prefixes_ok)
+}
+
+session_prefix_names_ok(vol_sessions, prefix = session_folder_prefix)
+```
+
+```{r}
+session_suffix_names_ok <- function(vol_sessions, prefix) {
+  suffixes_ok <- purrr::map(vol_sessions$session_name, session_name_suffix_ok) |> 
+    purrr::list_c()
+  sum(suffixes_ok) == length(suffixes_ok)
+}
+
+session_suffix_names_ok(vol_sessions, prefix = session_folder_prefix)
+```
+
+## Folder checks
+
+```{r}
+folders <- databraryr::list_volume_folders(vol_id = VOLUME_ID)
+```
+
+Are there folders?
+
+```{r}
+vol_folders <- databraryr::list_volume_folders(vol_id = VOLUME_ID)
+
+folders_exist <- function(vol_folders) {
+  assertthat::assert_that(!is.null(vol_folders))
+  dim(vol_folders)[1] > 0
+}
+
+folders_exist(vol_folders)
+```
+
+Is there only one folder?
+
+```{r}
+only_one_folder <- function(vol_folders) {
+  assertthat::assert_that(!is.null(vol_folders))
+  dim(vol_folders)[1] == 1
+}
+
+only_one_folder(vol_folders)
+```
+
+### Names
+
+Folder name follows standard.
+
+```{r}
+folder_name_contains_demographics <- function(vol_folders) {
+  assertthat::assert_that(!is.null(vol_folders))
+  assertthat::has_name(vol_folders, "folder_name")
+  names <- vol_folders$folder_name
+  sum(stringr::str_detect(names, "demographics")) == length(names)
+}
+
+folder_name_contains_demographics(vol_folders)
+```
+
+```{r}
+folder_name_ok <- function(vol_folders, prefix = "PLAY_PENNS_") {
+  assertthat::assert_that(!is.null(vol_folders))
+  assertthat::has_name(vol_folders, "folder_name")
+  assertthat::is.string(prefix)
+  
+  names <- vol_folders$folder_name
+  stringr::str_detect(names, "demographics")
+  
+  prefix_ok <- stringr::str_detect(names, paste0("^", prefix))
+  postfix_ok <- stringr::str_detect(names, "demographics$")
+  prefix_ok & postfix_ok
+}
+
+folder_name_ok(vol_folders)
+```
+
+### Release level
+
+Does the folder have a release level set to "authorized_users"
+
+```{r}
+folder_release_level_ok <- function(vol_folders) {
+  assertthat::assert_that(!is.null(vol_folders))
+  assertthat::has_name(vol_folders, "folder_release")
+  vol_folders$folder_release == "authorized_users"
+}
+
+folder_release_level_ok(vol_folders)
+```
+
+### Files
+
+Does the folder contain a demographics file?
+
+```{r}
+
+folder_contains_demog_file <- function(vol_folders, vol_id, file_prefix) {
+  assertthat::assert_that(!is.null(vol_folders))
+  assertthat::is.number(vol_id)
+  assertthat::assert_that(vol_id > 0)
+  
+  folder_assets <- databraryr::list_folder_assets(folder_id = vol_folders$folder_id, 
+                                      vol_id = vol_id)
+  assertthat::assert_that(!is.null(folder_assets))
+  
+  paste0(session_folder_prefix, "demographics") %in% folder_assets$asset_name
+}
+
+folder_contains_demog_file(vol_folders, VOLUME_ID, session_folder_prefix)
+```
+
+Does the file have the proper release level?
+
+```{r}
+demog_file_release_ok <- function(vol_folders, vol_id) {
+  assertthat::assert_that(!is.null(vol_folders))
+  assertthat::is.number(vol_id)
+  assertthat::assert_that(vol_id > 0)
+  
+  folder_assets <- databraryr::list_folder_assets(folder_id = vol_folders$folder_id, 
+                                      vol_id = vol_id)
+  assertthat::assert_that(!is.null(folder_assets))
+  
+  demog_file <- folder_assets |>
+    dplyr::filter(stringr::str_detect(asset_name, "demographics"))
+  
+  demog_file$asset_permission == "authorized_users"
+}
+
+demog_file_release_ok(vol_folders, VOLUME_ID)
+```
+
+## Interim summary report
+
+```{r}
+message("Volume name OK: ", vol_name_ok(vol_df))
+message("Volume sharing level OK: ", vol_sharing_level_ok(vol_df))
+message("Volume funding info OK: ", vol_funding_ok(vol_df))
+message("Sessions exist? ", sessions_exist(vol_sessions))
+message("Session name prefixes OK: ", session_prefix_names_ok(vol_sessions, prefix = session_folder_prefix))
+message("Session name suffixes OK: ", session_suffix_names_ok(vol_sessions, prefix = session_folder_prefix))
+message("Folder(s) exist? ", folders_exist(vol_folders))
+message("Folder name OK: ", folder_name_ok(vol_folders))
+message("Folder release level OK: ", folder_release_level_ok(vol_folders))
+message("Folder contains demographic file: ", folder_contains_demog_file(vol_folders, VOLUME_ID, session_folder_prefix))
+message("Demographic file has correct release level: ", demog_file_release_ok(vol_folders, VOLUME_ID))
+```
 
 ## Clean up
 
