@@ -1,0 +1,96 @@
+---
+title: "Site Volume QA"
+format: html
+---
+
+## About
+
+This page documents Rick Gilmore's work to develop a PLAY site-specific volume
+quality assurance (QA) workflow.
+
+## Setup
+
+::: {.callout-important}
+## Secure Databrary API access
+
+This workflow requires that the user has permission to use the Databrary secure API, has created appropriate credentials on their Databrary user account, and has saved those credentials locally in `~/.Renviron`.
+:::
+
+### Log in
+
+```{r}
+databraryr::login_db(email = Sys.getenv("DATABRARY_LOGIN"),
+         password = Sys.getenv("DATABRARY_PASSWORD"),
+         client_id = Sys.getenv("DATABRARY_CLIENT_ID"),
+         client_secret = Sys.getenv("DATABRARY_CLIENT_SECRET"),
+         store = FALSE,
+         overwrite = FALSE)
+```
+
+## Target Penn State volume
+
+Most of the functions we need require that we specify the target volume ID (`vol_id`).
+
+```{r}
+VOLUME_ID <- 1657
+```
+
+### Volume summary
+
+```{r}
+vol_df <- databraryr::get_volume_by_id(vol_id = VOLUME_ID)
+```
+
+Does the volume title follow the project convention?
+
+::: {.callout-note}
+The name 'prefix' contains "PLAYProject_" and the 'postfix' is a 5-chararacter string with all capital letters or a number.
+
+```{r}
+vol_name_ok <- function(vol_df) {
+  assertthat::assert_that(!is.null(vol_df))
+  assertthat::has_name(vol_df, "title")
+  prefix <- "PLAYProject_"
+  prefix_ok <- stringr::str_detect(vol_df$title, paste0("^", prefix))
+  postfix_ok <- stringr::str_detect(vol_df$title, "[A-Z1-2]{5}$")
+  prefix_ok & postfix_ok
+}
+```
+
+Is the volume sharing level ok?
+
+```{r}
+vol_sharing_level_ok <- function(vol_df, sharing_level = "public_overview_only") {
+  assertthat::assert_that(!is.null(vol_df))
+  assertthat::has_name(vol_df, "sharing_level")
+  assertthat::is.string(sharing_level)
+  assertthat::assert_that(sharing_level %in% c("public", "public_overview_only"))
+  vol_df$sharing_level == sharing_level
+}
+```
+
+Is funder information correct?
+
+::: {.callout-important}
+The funder should be consistent across the site specific volumes.
+
+**TODO**: Determine what that funder information should be.
+:::
+
+```{r}
+vol_funding_ok <- function(vol_df) {
+  assertthat::assert_that(!is.null(vol_df))
+  assertthat::has_name(vol_df, "fundings")
+  
+  
+}
+```
+
+
+## Clean up
+
+### Log out
+
+```{r}
+databraryr::logout_db()
+```
