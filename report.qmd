@@ -1,0 +1,158 @@
+---
+title: "PLAY QA Summary"
+format: html
+params:
+  vol_id: 1657
+  site_id: "PENNS"
+---
+
+## About
+
+This report summarizes the quality assurance checks run on the PLAY data collection site.
+
+Collection site: **`r params$site_id`**
+
+Link to source volume: `r paste0("<https://databrary.org/volume/", params$vol_id, ">")`
+
+## Setup
+
+### Source functions
+
+```{r}
+#| label: source-functions
+#| echo: false
+fl <- list.files("R", "*.R$", full.names = TRUE)
+purrr::map(fl, source) |>
+  purrr::quietly()
+```
+
+## Load packages
+
+```{r}
+#| label: load-packages
+#| echo: false
+suppressPackageStartupMessages(library(databraryr))
+```
+
+### Log in
+
+::: {.callout-important}
+## Secure Databrary API access
+
+This workflow requires that the user has permission to use the Databrary secure API, has created appropriate credentials on their Databrary user account, and has saved those credentials locally in `~/.Renviron`.
+:::
+
+```{r}
+#| label: login-databrary
+#| echo: false
+databraryr::login_db(email = Sys.getenv("DATABRARY_LOGIN"),
+         password = Sys.getenv("DATABRARY_PASSWORD"),
+         client_id = Sys.getenv("DATABRARY_CLIENT_ID"),
+         client_secret = Sys.getenv("DATABRARY_CLIENT_SECRET"),
+         store = FALSE,
+         overwrite = FALSE)
+```
+
+## Volume-wide checks
+
+```{r}
+#| label: get-volume-by-id
+#| echo: false
+vol_df <- databraryr::get_volume_by_id(vol_id = params$vol_id)
+vol_sessions <- databraryr::list_volume_sessions(vol_id = params$vol_id)
+```
+
+```{r}
+#| label: volume-checks
+#| echo: false
+message("Volume name OK: ", vol_name_format_ok(vol_df))
+message("Volume sharing level OK: ", vol_sharing_level_ok(vol_df))
+message("Volume sharing level: ", vol_df$sharing_level)
+message("Volume funding info OK: ", vol_funding_ok(vol_df))
+message("--------------")
+message("Sessions exist? ", sessions_exist(vol_sessions))
+message("Volume has n= ", n_sessions(vol_sessions), " sessions")
+session_releases <- xtabs(~ session_release, vol_sessions)
+message("\tLearning audiences: n= ", session_releases['learning_audiences'], " sessions")
+message("\tAuthorized users: n= ", session_releases['authorized_users'], " sessions")
+message("\tPrivate: n= ", session_releases['private'], " sessions")
+message("Percent sharable: ", format(100*(session_releases['learning_audiences'] + session_releases['authorized_users'])/n_sessions(vol_sessions), 1))
+```
+
+## Session checks
+
+```{r}
+#| label: session-checks
+#| echo: false
+
+session_folder_prefix <- make_session_folder_prefix(params$vol_id)
+message("Target session name prefix: '", session_folder_prefix, "'")
+message(
+  "Session name prefixes OK: ",
+  session_prefix_names_ok(vol_sessions, prefix = session_folder_prefix)
+)
+message(
+  "Session name suffixes OK: ",
+  session_suffix_names_ok(vol_sessions, prefix = session_folder_prefix)
+)
+```
+
+### Session file checks
+
+```{r}
+#| label: session-file-checks
+#| echo: false
+session_checks_df <- purrr::map2(
+  vol_sessions$session_id,
+  vol_sessions$session_name,
+  check_session_files,
+  vol_id = params$vol_id) |>
+  purrr::list_rbind()
+```
+
+```{r}
+#| label: tbl-session-file-checks
+#| echo: false
+session_checks_df |>
+  dplyr::mutate(
+    session_id = paste0(
+      "<a href='https://databrary.org/volume/",
+      params$vol_id,
+      "/session/",
+      session_id,
+      "'>",
+      session_id,
+      "</a>"
+    )
+  ) |>
+  kableExtra::kbl(format = 'html', escape = FALSE) |>
+  kableExtra::scroll_box(width = "100%", height = "500px", fixed_thead = TRUE)
+```
+
+## Folder checks
+
+```{r}
+#| label: folder-checks
+#| echo: false
+vol_folders <- databraryr::list_volume_folders(vol_id = params$vol_id)
+
+message("Folder(s) exist? ", folders_exist(vol_folders))
+message("N= ", n_folders(vol_folders), " folders")
+message("Folder name OK: ", folder_name_ok(vol_folders))
+message("Folder release level OK: ",
+        folder_release_level_ok(vol_folders))
+message(
+  "Folder contains demographic file: ",
+  folder_contains_demog_file(vol_folders, params$vol_id, session_folder_prefix)
+)
+message(
+  "Demographic file has correct release level: ",
+  demog_file_release_ok(vol_folders, params$vol_id)
+)
+```
+
+## Log out
+
+```{r}
+databraryr::logout_db()
+```

@@ -120,7 +120,23 @@ sessions_exist <- function(vol_sessions) {
   dim(vol_sessions)[1] > 0
 }
 
+n_sessions <- function(vol_sessions) {
+  assertthat::assert_that(!is.null(vol_sessions))
+  dim(vol_sessions)[1]
+}
+
+sessions_exist <- function(vol_sessions) {
+  n_sessions(vol_sessions) > 0
+}
+
 sessions_exist(vol_sessions)
+n_sessions(vol_sessions)
+```
+
+### Session release levels
+
+```{r}
+xtabs(~ session_release, vol_sessions)
 ```
 
 ### Session names
@@ -185,6 +201,174 @@ session_suffix_names_ok <- function(vol_sessions, prefix) {
 
 session_suffix_names_ok(vol_sessions, prefix = session_folder_prefix)
 ```
+
+### Session contents
+
+::: {.callout-important}
+## Criteria
+
+1. Each session should contain one or more video files (.mp4) with the following name format: "PLAY_<SITE_ID>_NaturalPlay.mp4".
+2. Each session should contain a video file (.mp4) with the following name format: "PLAY_<SITE_ID>_HouseWalkThrough.mp4".
+3. Each session should contain a video file (.mp4) with the following name format: "PLAY_<SITE_ID>_StructuredPlay.mp4".
+4. Each session should (optionally) contain a video file (.mp4) with the following name format: "PLAY_<SITE_ID>_Questionnaires.mp4"
+5. Each session should contain a CSV file with the following name format: "PLAY_<SITE_ID>_Decibel.csv"
+6. Each file in each session should have the same release level as the parent session.
+:::
+
+```{r}
+a_session <- vol_sessions[2,]
+session_assets <- databraryr::list_session_assets(a_session$session_id, vol_id = VOLUME_ID)
+file_prefix <- paste0(a_session$session_name, "_")
+```
+
+```{r}
+video_exists <- function(session_assets, prefix = NULL, suffix = NULL) {
+  assertthat::assert_that(!is.null(session_assets))
+  assertthat::has_name(session_assets, "asset_name")
+  assertthat::is.string(prefix)
+  assertthat::is.string(suffix)
+  
+  asset_names <- session_assets$asset_name
+  target_fn <- paste0(prefix, suffix)
+  if (!(target_fn %in% asset_names)) {
+    0
+  } else {
+  sum(target_fn %in% asset_names)
+  }
+}
+
+naturalPlay_video_exists <- function(session_assets, prefix, suffix = "NaturalPlay") {
+  video_exists(session_assets = session_assets, prefix = prefix, suffix = suffix)
+}
+
+naturalPlay_video_exists(session_assets, prefix = file_prefix)
+```
+
+```{r}
+houseWalkthrough_video_exists <- function(session_assets, prefix, suffix = "HouseWalkthrough") {
+  video_exists(session_assets = session_assets, prefix = prefix, suffix = suffix)
+}
+houseWalkthrough_video_exists(session_assets, prefix = file_prefix)
+```
+
+```{r}
+structuredPlay_video_exists <- function(session_assets, prefix, suffix = "StructuredPlay") {
+  video_exists(session_assets = session_assets, prefix = prefix, suffix = suffix)
+}
+structuredPlay_video_exists(session_assets, prefix = file_prefix)
+```
+
+```{r}
+questionnaires_video_exists <- function(session_assets, prefix, suffix = "Questionnaires") {
+  video_exists(session_assets = session_assets, prefix = prefix, suffix = suffix)
+}
+questionnaires_video_exists(session_assets, prefix = file_prefix)
+```
+
+```{r}
+decibel_exists <- function(session_assets, prefix, suffix = "Decibel") {
+  video_exists(session_assets = session_assets, prefix = prefix, suffix = suffix)
+}
+```
+
+```{r}
+file_release_matches_session <- function(session_assets = NULL, session_release = NULL) {
+  assertthat::assert_that(!is.null(session_assets))
+  assertthat::has_name(session_assets, "asset_permission")
+  assertthat::is.string(session_release)
+
+  releases_match <- (session_release %in% session_assets$asset_permission)
+  length(releases_match) == sum(releases_match)
+}
+
+file_release_matches_session(session_assets, a_session$session_release)
+```
+
+```{r}
+get_session_release <- function(this_session_id, vol_id) {
+  assertthat::is.number(this_session_id)
+  assertthat::assert_that(this_session_id > 0)
+  assertthat::is.number(vol_id)
+  assertthat::assert_that(vol_id > 0) 
+  
+  this_session <- databraryr::list_volume_sessions(vol_id = vol_id) |>
+    dplyr::filter(session_id == this_session_id)
+  
+  assertthat::assert_that(!is.null(this_session))
+  assertthat::has_name(this_session, "session_release")
+  assertthat::is.string(this_session$session_release)
+  this_session$session_release
+}
+
+get_session_release(a_session$session_id, VOLUME_ID)
+```
+
+
+Chunk through all sessions.
+
+```{r}
+check_session_files <- function(session_id = NULL, session_name = NULL, 
+                                vol_id = NULL) {
+  assertthat::is.number(session_id)
+  assertthat::assert_that(session_id > 0)
+  assertthat::is.number(vol_id)
+  assertthat::assert_that(vol_id > 0)
+
+  file_prefix <- paste0(session_name, "_")
+  assertthat::is.string(file_prefix)
+  
+  natural_play <- NA
+  house_walkthrough <- NA
+  structured_play <- NA
+  questionnaires <- NA
+  decibel <- NA
+  release_levels <- NA
+  
+  session_release <- get_session_release(session_id, VOLUME_ID)
+  assertthat::is.string(session_release)
+  
+  session_assets <- databraryr::list_session_assets(session_id, vol_id = vol_id)
+
+  if (!is.null(session_assets)) {
+    natural_play <- naturalPlay_video_exists(session_assets, prefix = file_prefix)
+    house_walkthrough <- houseWalkthrough_video_exists(session_assets, prefix = file_prefix)
+    structured_play <- structuredPlay_video_exists(session_assets, prefix = file_prefix)
+    questionnaires <- questionnaires_video_exists(session_assets, prefix = file_prefix)
+    decibel <- decibel_exists(session_assets, prefix = file_prefix)
+    release_levels <- file_release_matches_session(session_assets, session_release)
+  }
+  
+  tibble::tibble(
+    session_id = session_id,
+    session_name = session_name,
+    natural_play = natural_play,
+    house_walkthrough = house_walkthrough,
+    structured_play = structured_play,
+    questionnaires = questionnaires,
+    decibel = decibel,
+    release_levels = release_levels
+  )
+}
+
+check_session_files(a_session$session_id, a_session$session_name, vol_id = VOLUME_ID)
+```
+
+```{r}
+purrr::map2(vol_sessions$session_id,
+            vol_sessions$session_name,
+            check_session_files,
+            vol_id = VOLUME_ID,
+            .progress = paste0("N=", dim(vol_sessions)[1], " sessions...")) |>
+  purrr::list_rbind()
+```
+
+### Session metadata
+
+::: {.callout-warning}
+## Under construction
+
+This section is under construction.
+:::
 
 ## Folder checks
 
