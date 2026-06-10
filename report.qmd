@@ -1,18 +1,18 @@
 ---
 title: "PLAY QA Summary"
+subtitle: "Site"
+date: today
 format: html
 params:
   vol_id: 1657
-  site_id: "PENNS"
+  site_id: "PENNS" 
 ---
 
 ## About
 
 This report summarizes the quality assurance checks run on the PLAY data collection site.
 
-Collection site: **`r params$site_id`**
-
-Link to source volume: `r paste0("<https://databrary.org/volume/", params$vol_id, ">")`
+Link to (**`r params$site_id`**) source volume: `r paste0("<https://databrary.org/volume/", params$vol_id, ">")`
 
 ## Setup
 
@@ -20,7 +20,7 @@ Link to source volume: `r paste0("<https://databrary.org/volume/", params$vol_id
 
 ```{r}
 #| label: source-functions
-#| echo: false
+#| include: false
 fl <- list.files("R", "*.R$", full.names = TRUE)
 purrr::map(fl, source) |>
   purrr::quietly()
@@ -32,6 +32,9 @@ purrr::map(fl, source) |>
 #| label: load-packages
 #| echo: false
 suppressPackageStartupMessages(library(databraryr))
+suppressPackageStartupMessages(library(tidyselect))
+suppressPackageStartupMessages(library(kableExtra))
+suppressPackageStartupMessages(library(dplyr))
 ```
 
 ### Log in
@@ -45,7 +48,7 @@ This workflow requires that the user has permission to use the Databrary secure 
 ```{r}
 #| label: login-databrary
 #| echo: false
-databraryr::login_db(email = Sys.getenv("DATABRARY_LOGIN"),
+login_ok <- databraryr::login_db(email = Sys.getenv("DATABRARY_LOGIN"),
          password = Sys.getenv("DATABRARY_PASSWORD"),
          client_id = Sys.getenv("DATABRARY_CLIENT_ID"),
          client_secret = Sys.getenv("DATABRARY_CLIENT_SECRET"),
@@ -53,30 +56,91 @@ databraryr::login_db(email = Sys.getenv("DATABRARY_LOGIN"),
          overwrite = FALSE)
 ```
 
+### Validate input parameters
+
+```{r}
+#| label: tbl-validate-input-parameters
+vol_id_is_number <- assertthat::is.number(params$vol_id)
+vol_id_gt_0 <- assertthat::assert_that(params$vol_id > 0)
+site_id_is_string <- assertthat::is.string(params$site_id)
+site_id_has_5_chars <- assertthat::assert_that(stringr::str_length(params$site) == 5)
+
+input_df <- tibble::tibble(
+  vol_id = as.character(params$vol_id),
+  vol_id_number_ok = as.character(vol_id_is_number),
+  vol_id_gt_0_ok = as.character(vol_id_gt_0),
+  this_site_id = as.character(params$site_id),
+  site_id_string_ok = as.character(site_id_is_string),
+  site_id_5_chars_ok = as.character(site_id_has_5_chars)
+)
+
+input_df |>
+  dplyr::mutate(
+    vol_id = paste0(
+      "<a href='https://databrary.org/volume/",
+      params$vol_id,
+      "'>",
+      vol_id,
+      "</a>"
+    )
+  ) |>
+  tidyr::pivot_longer(cols = everything(),
+                      names_to = "checks",
+                      values_to = "status") |>
+  dplyr::mutate(status = cell_spec(status, "html", bold = ifelse(status == "FALSE", TRUE, FALSE))) |>
+  
+  kableExtra::kbl(format = 'html', escape = FALSE) |>
+  kableExtra::scroll_box(width = "100%", fixed_thead = TRUE) 
+```
+
 ## Volume-wide checks
 
 ```{r}
 #| label: get-volume-by-id
 #| echo: false
-vol_df <- databraryr::get_volume_by_id(vol_id = params$vol_id)
-vol_sessions <- databraryr::list_volume_sessions(vol_id = params$vol_id)
+
+if (login_ok) {
+  vol_df <- databraryr::get_volume_by_id(vol_id = params$vol_id)
+  vol_sessions <- databraryr::list_volume_sessions(vol_id = params$vol_id)
+} else {
+  warning("Databrary login failed. Skipping.")
+}
 ```
 
 ```{r}
 #| label: volume-checks
 #| echo: false
-message("Volume name OK: ", vol_name_format_ok(vol_df))
-message("Volume sharing level OK: ", vol_sharing_level_ok(vol_df))
-message("Volume sharing level: ", vol_df$sharing_level)
-message("Volume funding info OK: ", vol_funding_ok(vol_df))
-message("--------------")
-message("Sessions exist? ", sessions_exist(vol_sessions))
-message("Volume has n= ", n_sessions(vol_sessions), " sessions")
-session_releases <- xtabs(~ session_release, vol_sessions)
-message("\tLearning audiences: n= ", session_releases['learning_audiences'], " sessions")
-message("\tAuthorized users: n= ", session_releases['authorized_users'], " sessions")
-message("\tPrivate: n= ", session_releases['private'], " sessions")
-message("Percent sharable: ", format(100*(session_releases['learning_audiences'] + session_releases['authorized_users'])/n_sessions(vol_sessions), 1))
+
+if (login_ok) {
+  session_releases <- xtabs( ~ session_release, vol_sessions)
+  vol_checks <- tibble::tibble(
+    vol_name = vol_df$title,
+    name_ok = as.character(vol_name_format_ok(vol_df)),
+    sharing_level = as.character(vol_df$sharing_level),
+    sharing_level_ok = as.character(vol_sharing_level_ok(vol_df)),
+    funding_info_ok = as.character(vol_funding_ok(vol_df)),
+    has_sessions = as.character(sessions_exist(vol_sessions)),
+    n_sessions = as.character(n_sessions(vol_sessions)),
+    n_learning_aud = as.character(session_releases['learning_audiences']),
+    n_auth_users = as.character(session_releases['authorized_users']),
+    n_private = as.character(session_releases['private']),
+    pct_sess_shareable = as.character(format(round(
+      100 * (session_releases['learning_audiences'] + session_releases['authorized_users']) /
+        n_sessions(vol_sessions),
+      2
+    ), nsmall = 1))
+  )
+  
+  vol_checks |>
+    tidyr::pivot_longer(cols = everything(),
+                        names_to = "checks",
+                        values_to = "status") |>
+    dplyr::mutate(status = cell_spec(status, "html", bold = ifelse(status == "FALSE", TRUE, FALSE))) |>
+    kableExtra::kbl(format = 'html', escape = FALSE) |>
+    kableExtra::scroll_box(width = "100%", fixed_thead = TRUE)
+} else {
+  warning("Databrary login failed. Skipping.")
+}
 ```
 
 ## Session checks
@@ -85,16 +149,27 @@ message("Percent sharable: ", format(100*(session_releases['learning_audiences']
 #| label: session-checks
 #| echo: false
 
-session_folder_prefix <- make_session_folder_prefix(params$vol_id)
-message("Target session name prefix: '", session_folder_prefix, "'")
-message(
-  "Session name prefixes OK: ",
-  session_prefix_names_ok(vol_sessions, prefix = session_folder_prefix)
-)
-message(
-  "Session name suffixes OK: ",
-  session_suffix_names_ok(vol_sessions, prefix = session_folder_prefix)
-)
+if (login_ok) {
+  session_folder_prefix <- make_session_folder_prefix(params$vol_id)
+  session_name_checks <- tibble::tibble(
+    session_name_prefix = session_folder_prefix,
+    name_prefix_ok = as.character(
+      session_prefix_names_ok(vol_sessions, prefix = session_folder_prefix)
+    ),
+    name_suffix_ok = as.character(
+      session_suffix_names_ok(vol_sessions, prefix = session_folder_prefix)
+    )
+  )
+  
+  session_name_checks |>
+    tidyr::pivot_longer(everything(), names_to = "checks", values_to = "status") |>
+    dplyr::mutate(status = cell_spec(status, "html", bold = ifelse(status == "FALSE", TRUE, FALSE))) |>
+    kableExtra::kbl(format = 'html', escape = FALSE) |>
+    kableExtra::scroll_box(width = "100%", fixed_thead = TRUE)
+  
+} else {
+  warning("Databrary login failed. Skipping.")
+}
 ```
 
 ### Session file checks
@@ -102,17 +177,32 @@ message(
 ```{r}
 #| label: session-file-checks
 #| echo: false
-session_checks_df <- purrr::map2(
-  vol_sessions$session_id,
-  vol_sessions$session_name,
-  check_session_files,
-  vol_id = params$vol_id) |>
-  purrr::list_rbind()
+
+if (login_ok) {
+  session_checks_df <- purrr::map2(
+    vol_sessions$session_id,
+    vol_sessions$session_name,
+    check_session_files,
+    vol_id = params$vol_id
+  ) |>
+    purrr::list_rbind() |>
+    dplyr::arrange(session_name)
+} else {
+  warning("Databrary login failed. Skipping.")
+}
 ```
 
 ```{r}
 #| label: tbl-session-file-checks
 #| echo: false
+
+session_file_check <- function(status) {
+  not_na <- !is.na(status)
+  gt0 <- status > 0
+  not_na & gt0
+}
+
+if (login_ok) {
 session_checks_df |>
   dplyr::mutate(
     session_id = paste0(
@@ -125,8 +215,29 @@ session_checks_df |>
       "</a>"
     )
   ) |>
+  dplyr::mutate(natural_play = cell_spec(natural_play, "html", 
+                                         bold = ifelse(session_file_check(natural_play), 
+                                                       FALSE, TRUE))) |>
+  dplyr::mutate(house_walkthru = cell_spec(house_walkthrough, "html", 
+                                          bold = ifelse(session_file_check(house_walkthrough), 
+                                                            FALSE, TRUE))) |>
+    dplyr::mutate(struct_play = cell_spec(structured_play, "html",
+                                              bold = ifelse(session_file_check(structured_play), 
+                                                            FALSE, TRUE))) |>
+  dplyr::mutate(questionnaires = cell_spec(questionnaires, "html", 
+                                           bold = ifelse(session_file_check(questionnaires),
+                                                         FALSE, TRUE))) |>
+  dplyr::mutate(decibel = cell_spec(decibel, "html", 
+                                    bold = ifelse(session_file_check(decibel), FALSE, TRUE))) |>
+  dplyr::mutate(release_levels = cell_spec(release_levels, "html",
+                                          bold = ifelse(session_file_check(release_levels), 
+                                                        FALSE, TRUE))) |>
   kableExtra::kbl(format = 'html', escape = FALSE) |>
-  kableExtra::scroll_box(width = "100%", height = "500px", fixed_thead = TRUE)
+  kableExtra::scroll_box(width = "100%", fixed_thead = TRUE)  
+} else {
+  warning("Databrary login failed. Skipping.")
+}
+
 ```
 
 ## Folder checks
@@ -134,20 +245,31 @@ session_checks_df |>
 ```{r}
 #| label: folder-checks
 #| echo: false
-vol_folders <- databraryr::list_volume_folders(vol_id = params$vol_id)
 
-message("Folder(s) exist? ", folders_exist(vol_folders))
-message("N= ", n_folders(vol_folders), " folders")
-message("Folder name OK: ", folder_name_ok(vol_folders))
-message("Folder release level OK: ",
-        folder_release_level_ok(vol_folders))
-message(
-  "Folder contains demographic file: ",
-  folder_contains_demog_file(vol_folders, params$vol_id, session_folder_prefix)
-)
-message(
-  "Demographic file has correct release level: ",
-  demog_file_release_ok(vol_folders, params$vol_id)
+if (login_ok) {
+  vol_folders <- databraryr::list_volume_folders(vol_id = params$vol_id)
+  
+  vol_folder_checks <- tibble::tibble(
+    vol_has_folders = as.character(folders_exist(vol_folders)),
+    vol_n_folders = as.character(n_folders(vol_folders)),
+    vol_name_ok = as.character(folder_name_ok(vol_folders)),
+    vol_release_ok = as.character(folder_release_level_ok(vol_folders)),
+    vol_folder_contains_demog = as.character(
+      folder_contains_demog_file(vol_folders, params$vol_id, session_folder_prefix)
+    ),
+    vol_demog_file_release_ok = as.character(demog_file_release_ok(vol_folders, 
+                                                                   params$vol_id))
+  )
+  
+  vol_folder_checks |>
+    tidyr::pivot_longer(cols = starts_with("vol"), 
+                        names_to= "checks", values_to = "status") |>
+    kableExtra::kbl(format = 'html', escape = FALSE) |>
+    kableExtra::scroll_box(width = "100%", fixed_thead = TRUE)
+} else {
+  warning("Databrary login failed. Skipping.")
+}
+vol_folders <- databraryr::list_volume_folders(vol_id = params$vol_id
 )
 ```
 
